@@ -7,6 +7,7 @@ import '../../features/camera_server/data/datasources/native_camera_datasource.d
 import '../../features/camera_server/data/repositories/camera_repository_impl.dart';
 import '../../features/camera_server/domain/repositories/camera_repository.dart';
 import '../../features/stream_client/data/datasources/mjpeg_datasource.dart';
+import '../../features/stream_client/data/datasources/motion_events_datasource.dart';
 import '../../features/stream_client/data/repositories/stream_client_repository_impl.dart';
 import '../../features/stream_client/domain/repositories/stream_client_repository.dart';
 import '../security/token_storage.dart';
@@ -39,8 +40,12 @@ class ServiceLocator {
 
   static void _registerStreamClient() {
     sl.registerLazySingleton(MjpegClientDatasource.new);
+    sl.registerLazySingleton(MotionEventsDatasource.new);
     sl.registerLazySingleton<StreamClientRepository>(
-      () => StreamClientRepositoryImpl(datasource: sl()),
+      () => StreamClientRepositoryImpl(
+        datasource: sl(),
+        motionDatasource: sl(),
+      ),
     );
   }
 }

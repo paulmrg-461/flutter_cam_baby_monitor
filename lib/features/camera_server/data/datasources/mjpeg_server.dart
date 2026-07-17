@@ -2,10 +2,17 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../services/motion_detector.dart';
+
 class MjpegServer {
+  MjpegServer({MotionDetector? motionDetector})
+      : _motionDetector = motionDetector ?? MotionDetector();
+
   HttpServer? _server;
   final _clients = <HttpResponse>[];
+  final _eventClients = <HttpResponse>[];
   final _frameController = StreamController<Uint8List>.broadcast();
+  final MotionDetector _motionDetector;
   StreamSubscription<Uint8List>? _frameSubscription;
   int _port = 8080;
   String _authToken = '';
@@ -36,8 +43,14 @@ class MjpegServer {
 
   void bindFrameStream(Stream<Uint8List> frameStream) {
     _frameSubscription?.cancel();
+    // A new source (e.g. CameraX <-> native Camera2 handoff) means the
+    // previous reference frame is no longer comparable.
+    _motionDetector.reset();
     _frameSubscription = frameStream.listen((jpegData) {
       _frameController.add(jpegData);
+      if (_motionDetector.feed(jpegData)) {
+        _broadcastMotionEvent();
+      }
     });
   }
 
@@ -51,8 +64,44 @@ class MjpegServer {
       _handleStreamRequest(request);
     } else if (request.uri.path == '/status') {
       _handleStatusRequest(request);
+    } else if (request.uri.path == '/events') {
+      _handleEventsRequest(request);
     } else {
       _handleRootRequest(request);
+    }
+  }
+
+  void _handleEventsRequest(HttpRequest request) {
+    final response = request.response;
+    response.headers.set('Content-Type', 'text/event-stream');
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.headers.set('Connection', 'keep-alive');
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.bufferOutput = false;
+
+    _eventClients.add(response);
+    try {
+      response.write(': connected\n\n');
+    } catch (_) {
+      _eventClients.remove(response);
+      return;
+    }
+
+    response.done.then((_) {
+      _eventClients.remove(response);
+    });
+  }
+
+  void _broadcastMotionEvent() {
+    final payload =
+        '{"type":"motion","ts":${DateTime.now().millisecondsSinceEpoch}}';
+    final chunk = 'data: $payload\n\n';
+    for (final client in List<HttpResponse>.from(_eventClients)) {
+      try {
+        client.write(chunk);
+      } catch (_) {
+        _eventClients.remove(client);
+      }
     }
   }
 
@@ -131,14 +180,65 @@ class MjpegServer {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0D0D0D; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: system-ui, sans-serif; }
     h1 { color: #E0E0E0; margin-bottom: 16px; font-size: 1.5rem; }
-    img { max-width: 95vw; max-height: 85vh; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
+    .frame { position: relative; }
+    img { max-width: 95vw; max-height: 75vh; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.5); display: block; }
+    .motion-alert { position: absolute; inset: 0; border: 4px solid #EF5350; border-radius: 12px; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; }
     .status { color: #81C784; margin-top: 12px; font-size: 0.85rem; }
+    #soundBtn { margin-top: 16px; padding: 10px 20px; border-radius: 24px; border: none; background: #2C2C2C; color: #E0E0E0; font-size: 0.9rem; }
+    #soundBtn:disabled { background: #1B5E20; color: #A5D6A7; }
   </style>
 </head>
 <body>
   <h1>Baby Monitor</h1>
-  <img src="/stream?token=$_authToken" alt="Stream" />
+  <div class="frame">
+    <img src="/stream?token=$_authToken" alt="Stream" />
+    <div class="motion-alert" id="motionAlert"></div>
+  </div>
   <p class="status">Conectado | puerto $_port</p>
+  <button id="soundBtn">Activar sonido de alerta</button>
+  <script>
+    let audioCtx = null;
+    let soundEnabled = false;
+    const soundBtn = document.getElementById('soundBtn');
+    const motionAlert = document.getElementById('motionAlert');
+
+    soundBtn.onclick = () => {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+      soundEnabled = true;
+      soundBtn.textContent = 'Sonido activado';
+      soundBtn.disabled = true;
+    };
+
+    function beep() {
+      if (!soundEnabled || !audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.3;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    }
+
+    function flashMotion() {
+      motionAlert.style.opacity = '1';
+      setTimeout(() => { motionAlert.style.opacity = '0'; }, 1500);
+    }
+
+    const events = new EventSource('/events?token=$_authToken');
+    events.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'motion') {
+          beep();
+          flashMotion();
+        }
+      } catch (err) {}
+    };
+  </script>
 </body>
 </html>
 ''';
@@ -147,12 +247,19 @@ class MjpegServer {
     _frameSubscription?.cancel();
     _frameSubscription = null;
 
-    for (final client in _clients) {
+    for (final client in List<HttpResponse>.from(_clients)) {
       try {
         await client.close();
       } catch (_) {}
     }
     _clients.clear();
+
+    for (final client in List<HttpResponse>.from(_eventClients)) {
+      try {
+        await client.close();
+      } catch (_) {}
+    }
+    _eventClients.clear();
 
     await _server?.close(force: true);
     _server = null;
