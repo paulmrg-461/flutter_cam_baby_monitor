@@ -12,6 +12,8 @@ class MockCameraRepository extends Mock implements CameraRepository {}
 class MockTokenStorage extends Mock implements TokenStorage {}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late MockCameraRepository repository;
   late MockTokenStorage tokenStorage;
 

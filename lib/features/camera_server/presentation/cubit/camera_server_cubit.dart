@@ -1,20 +1,34 @@
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
+import '../../../../core/background/background_service_controller.dart';
 import '../../../../core/security/token_storage.dart';
 import '../../domain/entities/stream_config.dart';
 import '../../domain/repositories/camera_repository.dart';
 import 'camera_server_state.dart';
 
-class CameraServerCubit extends Cubit<CameraServerState> {
+class CameraServerCubit extends Cubit<CameraServerState>
+    with WidgetsBindingObserver {
   CameraServerCubit({required this._repository, required this._tokenStorage})
-      : super(const CameraServerState());
+      : super(const CameraServerState()) {
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final CameraRepository _repository;
   final TokenStorage _tokenStorage;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _repository.handleAppBackgrounded();
+    } else if (state == AppLifecycleState.resumed) {
+      _repository.handleAppForegrounded();
+    }
+  }
 
   CameraController? get cameraController => _repository.cameraController;
 
@@ -66,6 +80,7 @@ class CameraServerCubit extends Cubit<CameraServerState> {
   Future<void> startStreaming() async {
     try {
       await _repository.startStreaming();
+      await BackgroundServiceController.requestPermissions();
 
       emit(state.copyWith(
         status: CameraServerStatus.streaming,
@@ -178,6 +193,7 @@ class CameraServerCubit extends Cubit<CameraServerState> {
 
   @override
   Future<void> close() {
+    WidgetsBinding.instance.removeObserver(this);
     _repository.dispose();
     return super.close();
   }

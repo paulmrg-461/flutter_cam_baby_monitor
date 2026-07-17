@@ -42,7 +42,6 @@ dependencies:
   shelf_router: ^1.1.4
   get_it: ^9.2.1
   flutter_secure_storage: ^10.3.1
-
 dev_dependencies:
   bloc_test: ^10.0.0
   flutter_lints: ^6.0.0

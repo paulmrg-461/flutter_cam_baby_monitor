@@ -3,6 +3,7 @@ import 'package:get_it/get_it.dart';
 
 import '../../features/camera_server/data/datasources/camera_datasource.dart';
 import '../../features/camera_server/data/datasources/mjpeg_server.dart';
+import '../../features/camera_server/data/datasources/native_camera_datasource.dart';
 import '../../features/camera_server/data/repositories/camera_repository_impl.dart';
 import '../../features/camera_server/domain/repositories/camera_repository.dart';
 import '../../features/stream_client/data/datasources/mjpeg_datasource.dart';
@@ -25,11 +26,13 @@ class ServiceLocator {
   static void _registerCameraServer() {
     sl.registerLazySingleton(CameraDatasource.new);
     sl.registerLazySingleton(MjpegServer.new);
+    sl.registerLazySingleton(NativeCameraDatasource.new);
     sl.registerLazySingleton(TokenStorage.new);
     sl.registerLazySingleton<CameraRepository>(
       () => CameraRepositoryImpl(
         cameraDatasource: sl<CameraDatasource>(),
         mjpegServer: sl<MjpegServer>(),
+        nativeCameraDatasource: sl<NativeCameraDatasource>(),
       ),
     );
   }
