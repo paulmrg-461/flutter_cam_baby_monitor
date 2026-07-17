@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
                     "startService" -> {
                         val intent = Intent(this, CameraBackgroundService::class.java).apply {
                             action = CameraBackgroundService.ACTION_START_SERVICE
+                            putExtra("micEnabled", call.argument<Boolean>("micEnabled") ?: false)
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             startForegroundService(intent)

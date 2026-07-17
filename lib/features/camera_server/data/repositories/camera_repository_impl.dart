@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 
 import '../../domain/entities/stream_config.dart';
 import '../../domain/repositories/camera_repository.dart';
+import '../datasources/audio_datasource.dart';
 import '../datasources/camera_datasource.dart';
 import '../datasources/mjpeg_server.dart';
 import '../datasources/native_camera_datasource.dart';
@@ -14,11 +15,13 @@ class CameraRepositoryImpl implements CameraRepository {
     required this._cameraDatasource,
     required this._mjpegServer,
     required this._nativeCameraDatasource,
+    required this._audioDatasource,
   });
 
   final CameraDatasource _cameraDatasource;
   final MjpegServer _mjpegServer;
   final NativeCameraDatasource _nativeCameraDatasource;
+  final AudioDatasource _audioDatasource;
   StreamSubscription<Uint8List>? _frameSubscription;
   late StreamConfig _config;
   bool _isBackgroundCapture = false;
@@ -43,9 +46,18 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> startStreaming() async {
     final imageStream = _cameraDatasource.startImageStream();
     _mjpegServer.bindFrameStream(imageStream);
+
+    // Audio is a best-effort enhancement: a denied mic permission must
+    // never block video streaming, so this never throws.
+    final audioStream = await _audioDatasource.start();
+    if (audioStream != null) {
+      _mjpegServer.bindAudioStream(audioStream);
+    }
+
     // Must start while the app is visible: Android 14+ requires a
-    // camera-typed foreground service to be launched from the foreground.
-    await _nativeCameraDatasource.startService();
+    // camera/microphone-typed foreground service to be launched from the
+    // foreground, with the underlying permissions already granted.
+    await _nativeCameraDatasource.startService(micEnabled: audioStream != null);
   }
 
   @override
@@ -53,6 +65,7 @@ class CameraRepositoryImpl implements CameraRepository {
     if (_isBackgroundCapture) {
       _isBackgroundCapture = false;
     }
+    await _audioDatasource.stop();
     await _nativeCameraDatasource.stopService();
     _cameraDatasource.stopImageStream();
   }
@@ -105,6 +118,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> dispose() async {
     _frameSubscription?.cancel();
     _isBackgroundCapture = false;
+    await _audioDatasource.dispose();
     await _nativeCameraDatasource.stopService();
     await _cameraDatasource.dispose();
     await _mjpegServer.stop();

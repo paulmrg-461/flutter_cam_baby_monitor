@@ -11,9 +11,12 @@ class MjpegServer {
   HttpServer? _server;
   final _clients = <HttpResponse>[];
   final _eventClients = <HttpResponse>[];
+  final _audioClients = <HttpResponse>[];
   final _frameController = StreamController<Uint8List>.broadcast();
+  final _audioController = StreamController<Uint8List>.broadcast();
   final MotionDetector _motionDetector;
   StreamSubscription<Uint8List>? _frameSubscription;
+  StreamSubscription<Uint8List>? _audioSubscription;
   int _port = 8080;
   String _authToken = '';
 
@@ -54,6 +57,17 @@ class MjpegServer {
     });
   }
 
+  /// Feeds raw PCM16 audio chunks (from [AudioDatasource]) to any
+  /// connected `/audio` clients. Independent of [bindFrameStream]: audio
+  /// capture has no CameraX-style lifecycle coupling, so it isn't reset or
+  /// re-bound on the background/foreground camera handoff.
+  void bindAudioStream(Stream<Uint8List> audioStream) {
+    _audioSubscription?.cancel();
+    _audioSubscription = audioStream.listen((chunk) {
+      _audioController.add(chunk);
+    });
+  }
+
   void _handleRequest(HttpRequest request) {
     if (!_isAuthorized(request)) {
       _rejectUnauthorized(request);
@@ -62,6 +76,8 @@ class MjpegServer {
 
     if (request.uri.path == '/stream') {
       _handleStreamRequest(request);
+    } else if (request.uri.path == '/audio') {
+      _handleAudioRequest(request);
     } else if (request.uri.path == '/status') {
       _handleStatusRequest(request);
     } else if (request.uri.path == '/events') {
@@ -69,6 +85,59 @@ class MjpegServer {
     } else {
       _handleRootRequest(request);
     }
+  }
+
+  void _handleAudioRequest(HttpRequest request) {
+    final response = request.response;
+    response.headers.set('Content-Type', 'audio/L16;rate=16000;channels=1');
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.headers.set('Connection', 'keep-alive');
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.bufferOutput = false;
+
+    var isOpen = true;
+    // dart:io holds response headers back until the first non-empty body
+    // write (a zero-length add() is a no-op that never touches the
+    // socket). Without this, a client's request.close() hangs until real
+    // audio actually starts flowing, which can be seconds after the mic
+    // finishes initializing. Two zero bytes = one silent PCM16 sample —
+    // inaudible, and forces the headers out immediately.
+    try {
+      response.add(Uint8List(2));
+    } catch (_) {
+      isOpen = false;
+    }
+
+    final subscription = _audioController.stream.listen(
+      (chunk) {
+        if (!isOpen) return;
+        try {
+          response.add(chunk);
+        } catch (_) {
+          isOpen = false;
+        }
+      },
+      onDone: () {
+        isOpen = false;
+        try {
+          response.close();
+        } catch (_) {}
+      },
+      onError: (_) {
+        isOpen = false;
+        try {
+          response.close();
+        } catch (_) {}
+      },
+    );
+
+    response.done.then((_) {
+      isOpen = false;
+      subscription.cancel();
+      _audioClients.remove(response);
+    });
+
+    _audioClients.add(response);
   }
 
   void _handleEventsRequest(HttpRequest request) {
@@ -246,6 +315,8 @@ class MjpegServer {
   Future<void> stop() async {
     _frameSubscription?.cancel();
     _frameSubscription = null;
+    _audioSubscription?.cancel();
+    _audioSubscription = null;
 
     for (final client in List<HttpResponse>.from(_clients)) {
       try {
@@ -261,9 +332,17 @@ class MjpegServer {
     }
     _eventClients.clear();
 
+    for (final client in List<HttpResponse>.from(_audioClients)) {
+      try {
+        await client.close();
+      } catch (_) {}
+    }
+    _audioClients.clear();
+
     await _server?.close(force: true);
     _server = null;
 
     await _frameController.close();
+    await _audioController.close();
   }
 }

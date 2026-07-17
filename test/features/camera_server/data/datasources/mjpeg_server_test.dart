@@ -69,6 +69,42 @@ void main() {
     expect(response.statusCode, HttpStatus.unauthorized);
   });
 
+  test('security: the audio endpoint is also gated by the token', () async {
+    final response = await hit('/audio');
+
+    expect(response.statusCode, HttpStatus.unauthorized);
+  });
+
+  test(
+    'success: audio chunks bound via bindAudioStream reach connected /audio clients',
+    () async {
+      final audioClient = HttpClient();
+      final request = await audioClient.getUrl(
+        Uri.parse('http://127.0.0.1:${server.port}/audio?token=$token'),
+      );
+      final response = await request.close();
+      addTearDown(audioClient.close);
+
+      final received = StreamController<List<int>>();
+      response.listen(received.add);
+
+      final chunks = StreamController<Uint8List>();
+      server.bindAudioStream(chunks.stream);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      chunks.add(Uint8List.fromList([1, 2, 3, 4]));
+
+      // The server primes the connection with 2 bytes of silence to force
+      // headers out immediately (see _handleAudioRequest); skip past that
+      // to find our actual test payload.
+      final firstChunk = await received.stream
+          .firstWhere((c) => c.length == 4)
+          .timeout(const Duration(seconds: 5));
+
+      expect(firstChunk, [1, 2, 3, 4]);
+      await chunks.close();
+    },
+  );
+
   test(
     'success: a motion trigger is broadcast as an SSE message to connected /events clients',
     () async {
