@@ -10,10 +10,9 @@ import '../datasources/mjpeg_server.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
   CameraRepositoryImpl({
-    required CameraDatasource cameraDatasource,
-    required MjpegServer mjpegServer,
-  })  : _cameraDatasource = cameraDatasource,
-        _mjpegServer = mjpegServer;
+    required this._cameraDatasource,
+    required this._mjpegServer,
+  });
 
   final CameraDatasource _cameraDatasource;
   final MjpegServer _mjpegServer;
@@ -33,7 +32,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> initialize(StreamConfig config) async {
     _config = config;
     await _cameraDatasource.initialize(config);
-    await _mjpegServer.start(port: config.port);
+    await _mjpegServer.start(port: config.port, authToken: config.authToken);
   }
 
   @override

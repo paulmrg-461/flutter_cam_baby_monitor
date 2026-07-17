@@ -8,15 +8,30 @@ class MjpegServer {
   final _frameController = StreamController<Uint8List>.broadcast();
   StreamSubscription<Uint8List>? _frameSubscription;
   int _port = 8080;
+  String _authToken = '';
 
   int get port => _port;
   bool get isRunning => _server != null;
   Stream<Uint8List> get frameStream => _frameController.stream;
 
-  Future<void> start({int port = 8080}) async {
-    _port = port;
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
+  Future<void> start({int port = 8080, required String authToken}) async {
+    _authToken = authToken;
+    _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    _port = _server!.port;
     _server!.listen(_handleRequest);
+  }
+
+  bool _isAuthorized(HttpRequest request) {
+    if (_authToken.isEmpty) return false;
+    return request.uri.queryParameters['token'] == _authToken;
+  }
+
+  void _rejectUnauthorized(HttpRequest request) {
+    request.response
+      ..statusCode = HttpStatus.unauthorized
+      ..headers.contentType = ContentType.text
+      ..write('Unauthorized')
+      ..close();
   }
 
   void bindFrameStream(Stream<Uint8List> frameStream) {
@@ -27,6 +42,11 @@ class MjpegServer {
   }
 
   void _handleRequest(HttpRequest request) {
+    if (!_isAuthorized(request)) {
+      _rejectUnauthorized(request);
+      return;
+    }
+
     if (request.uri.path == '/stream') {
       _handleStreamRequest(request);
     } else if (request.uri.path == '/status') {
@@ -117,7 +137,7 @@ class MjpegServer {
 </head>
 <body>
   <h1>Baby Monitor</h1>
-  <img src="/stream" alt="Stream" />
+  <img src="/stream?token=$_authToken" alt="Stream" />
   <p class="status">Conectado | puerto $_port</p>
 </body>
 </html>

@@ -2,17 +2,16 @@ import 'dart:typed_data';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../data/datasources/mjpeg_datasource.dart';
+import '../../domain/repositories/stream_client_repository.dart';
 import 'stream_client_state.dart';
 
 class StreamClientCubit extends Cubit<StreamClientState> {
-  StreamClientCubit({required MjpegClientDatasource datasource})
-      : _datasource = datasource,
-        super(const StreamClientState());
+  StreamClientCubit({required this._repository})
+    : super(const StreamClientState());
 
-  final MjpegClientDatasource _datasource;
+  final StreamClientRepository _repository;
 
-  Stream<Uint8List> get frameStream => _datasource.frameStream;
+  Stream<Uint8List> get frameStream => _repository.frameStream;
 
   Future<void> connect(String url) async {
     emit(state.copyWith(
@@ -21,7 +20,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
     ));
 
     try {
-      await _datasource.connect(url);
+      await _repository.connect(url);
 
       emit(state.copyWith(status: StreamClientStatus.connected));
     } catch (e) {
@@ -33,7 +32,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
   }
 
   void disconnect() {
-    _datasource.disconnect();
+    _repository.disconnect();
     emit(state.copyWith(status: StreamClientStatus.disconnected));
   }
 
@@ -50,7 +49,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
 
   @override
   Future<void> close() {
-    _datasource.dispose();
+    _repository.dispose();
     return super.close();
   }
 }

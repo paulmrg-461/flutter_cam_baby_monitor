@@ -1,39 +1,58 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
+import '../../../../core/security/token_storage.dart';
 import '../../domain/entities/stream_config.dart';
 import '../../domain/repositories/camera_repository.dart';
 import 'camera_server_state.dart';
 
 class CameraServerCubit extends Cubit<CameraServerState> {
-  CameraServerCubit({required CameraRepository repository})
-      : _repository = repository,
-        super(const CameraServerState());
+  CameraServerCubit({required this._repository, required this._tokenStorage})
+      : super(const CameraServerState());
 
   final CameraRepository _repository;
-  StreamSubscription? _clientCountSubscription;
+  final TokenStorage _tokenStorage;
 
   CameraController? get cameraController => _repository.cameraController;
 
   Future<void> initialize() async {
+    final token = await _tokenStorage.getOrCreateToken();
+    await _initializeWith(token);
+  }
+
+  Future<void> regenerateToken() async {
+    if (state.status == CameraServerStatus.initial ||
+        state.status == CameraServerStatus.initializing) {
+      return;
+    }
+    await _repository.dispose();
+    final token = await _tokenStorage.regenerateToken();
+    await _initializeWith(token);
+  }
+
+  Future<void> _initializeWith(String token) async {
     emit(state.copyWith(status: CameraServerStatus.initializing));
 
     try {
-      await _repository.initialize(state.config);
+      final config = state.config.copyWith(authToken: token);
+      await _repository.initialize(config);
 
       final localIp = await _getLocalIp();
-      final port = state.config.port;
-      final streamUrl = 'http://$localIp:$port/stream';
+      final port = config.port;
+      final base = 'http://$localIp:$port';
+      final streamUrl = '$base/stream?token=${config.authToken}';
+      final browserUrl = '$base/?token=${config.authToken}';
 
       emit(state.copyWith(
         status: CameraServerStatus.initialized,
+        config: config,
         localIp: localIp,
         port: port,
         streamUrl: streamUrl,
+        browserUrl: browserUrl,
         clearError: true,
       ));
     } catch (e) {
@@ -96,25 +115,39 @@ class CameraServerCubit extends Cubit<CameraServerState> {
   }
 
   Future<String> _getLocalIp() async {
-    try {
-      final info = NetworkInfo();
-      final wifiIp = await info.getWifiIP();
-      if (wifiIp != null && wifiIp.isNotEmpty) {
-        return wifiIp;
-      }
-    } catch (_) {}
+    final wifiIp = await _getWifiIp();
+    if (wifiIp != null) return wifiIp;
 
-    try {
-      final info = NetworkInfo();
-      final wifiIpv4 = await info.getWifiBroadcast();
-      if (wifiIpv4 != null && wifiIpv4.isNotEmpty) {
-        final parts = wifiIpv4.split('.');
-        if (parts.length == 4) {
-          return '${parts[0]}.${parts[1]}.${parts[2]}.1';
-        }
-      }
-    } catch (_) {}
+    final broadcastIp = await _getWifiBroadcastGatewayIp();
+    if (broadcastIp != null) return broadcastIp;
 
+    final interfaceIp = await _getFirstInterfaceIp();
+    if (interfaceIp != null) return interfaceIp;
+
+    return '0.0.0.0';
+  }
+
+  Future<String?> _getWifiIp() async {
+    try {
+      final wifiIp = await NetworkInfo().getWifiIP();
+      if (wifiIp != null && wifiIp.isNotEmpty) return wifiIp;
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _getWifiBroadcastGatewayIp() async {
+    try {
+      final broadcast = await NetworkInfo().getWifiBroadcast();
+      if (broadcast == null || broadcast.isEmpty) return null;
+      final parts = broadcast.split('.');
+      if (parts.length != 4) return null;
+      return '${parts[0]}.${parts[1]}.${parts[2]}.1';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _getFirstInterfaceIp() async {
     try {
       final interfaces = await NetworkInterface.list();
       for (final interface in interfaces) {
@@ -126,8 +159,7 @@ class CameraServerCubit extends Cubit<CameraServerState> {
         }
       }
     } catch (_) {}
-
-    return '0.0.0.0';
+    return null;
   }
 
   String _mapError(Object e) {
@@ -146,7 +178,6 @@ class CameraServerCubit extends Cubit<CameraServerState> {
 
   @override
   Future<void> close() {
-    _clientCountSubscription?.cancel();
     _repository.dispose();
     return super.close();
   }

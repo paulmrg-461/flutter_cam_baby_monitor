@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../data/datasources/camera_datasource.dart';
-import '../../data/datasources/mjpeg_server.dart';
-import '../../data/repositories/camera_repository_impl.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/security/token_storage.dart';
+import '../../domain/repositories/camera_repository.dart';
 import '../cubit/camera_server_cubit.dart';
 import '../cubit/camera_server_state.dart';
 import '../widgets/camera_preview.dart';
@@ -17,10 +17,8 @@ class CameraServerPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => CameraServerCubit(
-        repository: CameraRepositoryImpl(
-          cameraDatasource: CameraDatasource(),
-          mjpegServer: MjpegServer(),
-        ),
+        repository: sl<CameraRepository>(),
+        tokenStorage: sl<TokenStorage>(),
       ),
       child: const _CameraServerView(),
     );
@@ -51,7 +49,21 @@ class _CameraServerViewState extends State<_CameraServerView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Baby Monitor - Servidor')),
+      appBar: AppBar(
+        title: const Text('Baby Monitor - Servidor'),
+        actions: [
+          BlocBuilder<CameraServerCubit, CameraServerState>(
+            builder: (context, state) {
+              if (state.streamUrl == null) return const SizedBox.shrink();
+              return IconButton(
+                icon: const Icon(Icons.vpn_key),
+                tooltip: 'Regenerar token de acceso',
+                onPressed: () => _confirmRegenerateToken(context),
+              );
+            },
+          ),
+        ],
+      ),
       body: BlocConsumer<CameraServerCubit, CameraServerState>(
         listener: (context, state) {
           if (state.status == CameraServerStatus.error) {
@@ -73,6 +85,34 @@ class _CameraServerViewState extends State<_CameraServerView> {
         },
       ),
     );
+  }
+
+  Future<void> _confirmRegenerateToken(BuildContext context) async {
+    final cubit = context.read<CameraServerCubit>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Regenerar token'),
+        content: const Text(
+          'Esto invalida el URL actual. Cualquier dispositivo con el link '
+          'viejo va a dejar de poder ver la camara.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Regenerar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await cubit.regenerateToken();
+    }
   }
 
   Widget _buildBody(BuildContext context, CameraServerState state) {
@@ -136,6 +176,7 @@ class _CameraServerViewState extends State<_CameraServerView> {
         if (state.streamUrl != null)
           ConnectionInfoWidget(
             streamUrl: state.streamUrl,
+            browserUrl: state.browserUrl,
             localIp: state.localIp,
             port: state.port,
           ),

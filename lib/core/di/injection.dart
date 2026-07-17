@@ -1,4 +1,16 @@
 import 'package:camera/camera.dart';
+import 'package:get_it/get_it.dart';
+
+import '../../features/camera_server/data/datasources/camera_datasource.dart';
+import '../../features/camera_server/data/datasources/mjpeg_server.dart';
+import '../../features/camera_server/data/repositories/camera_repository_impl.dart';
+import '../../features/camera_server/domain/repositories/camera_repository.dart';
+import '../../features/stream_client/data/datasources/mjpeg_datasource.dart';
+import '../../features/stream_client/data/repositories/stream_client_repository_impl.dart';
+import '../../features/stream_client/domain/repositories/stream_client_repository.dart';
+import '../security/token_storage.dart';
+
+final sl = GetIt.instance;
 
 class ServiceLocator {
   static List<CameraDescription> _cameras = [];
@@ -6,5 +18,26 @@ class ServiceLocator {
 
   static Future<void> initialize() async {
     _cameras = await availableCameras();
+    _registerCameraServer();
+    _registerStreamClient();
+  }
+
+  static void _registerCameraServer() {
+    sl.registerLazySingleton(CameraDatasource.new);
+    sl.registerLazySingleton(MjpegServer.new);
+    sl.registerLazySingleton(TokenStorage.new);
+    sl.registerLazySingleton<CameraRepository>(
+      () => CameraRepositoryImpl(
+        cameraDatasource: sl<CameraDatasource>(),
+        mjpegServer: sl<MjpegServer>(),
+      ),
+    );
+  }
+
+  static void _registerStreamClient() {
+    sl.registerLazySingleton(MjpegClientDatasource.new);
+    sl.registerLazySingleton<StreamClientRepository>(
+      () => StreamClientRepositoryImpl(datasource: sl()),
+    );
   }
 }

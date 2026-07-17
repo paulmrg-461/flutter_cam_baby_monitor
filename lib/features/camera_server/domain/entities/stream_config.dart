@@ -7,6 +7,7 @@ class StreamConfig extends Equatable {
   final int targetFps;
   final int port;
   final CameraLensDirection lensDirection;
+  final String authToken;
 
   const StreamConfig({
     this.resolution = ResolutionPreset.medium,
@@ -14,6 +15,7 @@ class StreamConfig extends Equatable {
     this.targetFps = 10,
     this.port = 8080,
     this.lensDirection = CameraLensDirection.back,
+    this.authToken = '',
   });
 
   StreamConfig copyWith({
@@ -22,6 +24,7 @@ class StreamConfig extends Equatable {
     int? targetFps,
     int? port,
     CameraLensDirection? lensDirection,
+    String? authToken,
   }) {
     return StreamConfig(
       resolution: resolution ?? this.resolution,
@@ -29,9 +32,11 @@ class StreamConfig extends Equatable {
       targetFps: targetFps ?? this.targetFps,
       port: port ?? this.port,
       lensDirection: lensDirection ?? this.lensDirection,
+      authToken: authToken ?? this.authToken,
     );
   }
 
   @override
-  List<Object?> get props => [resolution, quality, targetFps, port, lensDirection];
+  List<Object?> get props =>
+      [resolution, quality, targetFps, port, lensDirection, authToken];
 }

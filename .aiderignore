@@ -54,3 +54,4 @@ vendor/
 *.tar.gz
 
 **/.claude/settings.local.json
+.aider*

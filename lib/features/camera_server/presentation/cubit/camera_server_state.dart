@@ -10,8 +10,8 @@ class CameraServerState extends Equatable {
   final String? localIp;
   final int? port;
   final String? streamUrl;
+  final String? browserUrl;
   final String? errorMessage;
-  final int connectedClients;
 
   const CameraServerState({
     this.status = CameraServerStatus.initial,
@@ -19,8 +19,8 @@ class CameraServerState extends Equatable {
     this.localIp,
     this.port,
     this.streamUrl,
+    this.browserUrl,
     this.errorMessage,
-    this.connectedClients = 0,
   });
 
   CameraServerState copyWith({
@@ -29,8 +29,8 @@ class CameraServerState extends Equatable {
     String? localIp,
     int? port,
     String? streamUrl,
+    String? browserUrl,
     String? errorMessage,
-    int? connectedClients,
     bool clearError = false,
   }) {
     return CameraServerState(
@@ -39,8 +39,8 @@ class CameraServerState extends Equatable {
       localIp: localIp ?? this.localIp,
       port: port ?? this.port,
       streamUrl: streamUrl ?? this.streamUrl,
+      browserUrl: browserUrl ?? this.browserUrl,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
-      connectedClients: connectedClients ?? this.connectedClients,
     );
   }
 
@@ -51,7 +51,7 @@ class CameraServerState extends Equatable {
         localIp,
         port,
         streamUrl,
+        browserUrl,
         errorMessage,
-        connectedClients,
       ];
 }

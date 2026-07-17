@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
 import '../../domain/entities/stream_config.dart';
@@ -13,6 +13,7 @@ class CameraDatasource {
   CameraImage? _lastImage;
   Timer? _throttleTimer;
   bool _isStreaming = false;
+  bool _isConverting = false;
   late StreamConfig _config;
 
   CameraController? get controller => _controller;
@@ -48,18 +49,41 @@ class CameraDatasource {
     final frameInterval = Duration(
       milliseconds: max(1, (1000 / _config.targetFps).round()),
     );
-    _throttleTimer = Timer.periodic(frameInterval, (_) {
-      if (_lastImage != null &&
-          _frameController != null &&
-          !_frameController!.isClosed) {
-        final jpeg = _convertToJpeg(_lastImage!);
-        if (jpeg != null) {
-          _frameController!.add(jpeg);
-        }
-      }
-    });
+    _throttleTimer = Timer.periodic(frameInterval, (_) => _emitNextFrame());
 
     return _frameController!.stream;
+  }
+
+  void _emitNextFrame() {
+    if (_isConverting || _lastImage == null) return;
+    if (_frameController == null || _frameController!.isClosed) return;
+
+    _isConverting = true;
+    final frameData = _buildFrameData(_lastImage!);
+
+    compute(convertFrameToJpeg, frameData).then((jpeg) {
+      _isConverting = false;
+      if (jpeg != null &&
+          _frameController != null &&
+          !_frameController!.isClosed) {
+        _frameController!.add(jpeg);
+      }
+    }).catchError((_) {
+      _isConverting = false;
+    });
+  }
+
+  FrameConversionData _buildFrameData(CameraImage image) {
+    return FrameConversionData(
+      width: image.width,
+      height: image.height,
+      format: image.format.group,
+      quality: _config.quality,
+      planeBytes: [
+        for (final plane in image.planes) Uint8List.fromList(plane.bytes),
+      ],
+      bytesPerRow: [for (final plane in image.planes) plane.bytesPerRow],
+    );
   }
 
   void stopImageStream() {
@@ -72,91 +96,128 @@ class CameraDatasource {
     _lastImage = null;
   }
 
-  Uint8List? _convertToJpeg(CameraImage image) {
-    try {
-      final width = image.width;
-      final height = image.height;
-
-      final imgImage = img.Image(width: width, height: height);
-
-      final format = image.format;
-      if (format == ImageFormatGroup.nv21) {
-        _nv21ToImage(image, imgImage, width, height);
-      } else if (format == ImageFormatGroup.yuv420) {
-        _yuv420ToImage(image, imgImage, width, height);
-      } else if (format == ImageFormatGroup.bgra8888) {
-        _bgraToImage(image, imgImage, width, height);
-      } else {
-        return null;
-      }
-
-      final jpeg = img.encodeJpg(imgImage, quality: _config.quality);
-      return Uint8List.fromList(jpeg);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  void _nv21ToImage(CameraImage image, img.Image imgImage, int width, int height) {
-    final yPlane = image.planes[0];
-    final vuPlane = image.planes[1];
-
-    for (var y = 0; y < height; y++) {
-      for (var x = 0; x < width; x++) {
-        final yValue = yPlane.bytes[y * yPlane.bytesPerRow + x];
-
-        final vuIndex = (y ~/ 2) * vuPlane.bytesPerRow + (x ~/ 2) * 2;
-        final vValue = vuPlane.bytes[vuIndex];
-        final uValue = vuPlane.bytes[vuIndex + 1];
-
-        final r = (yValue + 1.402 * (vValue - 128)).round().clamp(0, 255);
-        final g = (yValue - 0.344 * (uValue - 128) - 0.714 * (vValue - 128)).round().clamp(0, 255);
-        final b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
-
-        imgImage.setPixelRgba(x, y, r, g, b, 255);
-      }
-    }
-  }
-
-  void _yuv420ToImage(CameraImage image, img.Image imgImage, int width, int height) {
-    final yPlane = image.planes[0];
-    final uPlane = image.planes[1];
-    final vPlane = image.planes[2];
-
-    for (var y = 0; y < height; y++) {
-      for (var x = 0; x < width; x++) {
-        final yValue = yPlane.bytes[y * yPlane.bytesPerRow + x];
-
-        final uvIndex = (y ~/ 2) * uPlane.bytesPerRow + (x ~/ 2);
-        final uValue = uPlane.bytes[uvIndex];
-        final vValue = vPlane.bytes[uvIndex];
-
-        final r = (yValue + 1.402 * (vValue - 128)).round().clamp(0, 255);
-        final g = (yValue - 0.344 * (uValue - 128) - 0.714 * (vValue - 128)).round().clamp(0, 255);
-        final b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
-
-        imgImage.setPixelRgba(x, y, r, g, b, 255);
-      }
-    }
-  }
-
-  void _bgraToImage(CameraImage image, img.Image imgImage, int width, int height) {
-    final plane = image.planes[0];
-    for (var y = 0; y < height; y++) {
-      for (var x = 0; x < width; x++) {
-        final offset = y * plane.bytesPerRow + x * 4;
-        final b = plane.bytes[offset];
-        final g = plane.bytes[offset + 1];
-        final r = plane.bytes[offset + 2];
-        final a = plane.bytes[offset + 3];
-        imgImage.setPixelRgba(x, y, r, g, b, a);
-      }
-    }
-  }
-
   Future<void> dispose() async {
     stopImageStream();
     await _controller?.dispose();
     _controller = null;
+  }
+}
+
+@immutable
+class FrameConversionData {
+  final int width;
+  final int height;
+  final ImageFormatGroup format;
+  final int quality;
+  final List<Uint8List> planeBytes;
+  final List<int> bytesPerRow;
+
+  const FrameConversionData({
+    required this.width,
+    required this.height,
+    required this.format,
+    required this.quality,
+    required this.planeBytes,
+    required this.bytesPerRow,
+  });
+}
+
+/// Runs on a background isolate via [compute]; must stay a top-level function.
+Uint8List? convertFrameToJpeg(FrameConversionData data) {
+  try {
+    final imgImage = img.Image(width: data.width, height: data.height);
+
+    switch (data.format) {
+      case ImageFormatGroup.nv21:
+        _nv21ToImage(data, imgImage);
+      case ImageFormatGroup.yuv420:
+        _yuv420ToImage(data, imgImage);
+      case ImageFormatGroup.bgra8888:
+        _bgraToImage(data, imgImage);
+      default:
+        return null;
+    }
+
+    return Uint8List.fromList(img.encodeJpg(imgImage, quality: data.quality));
+  } catch (_) {
+    return null;
+  }
+}
+
+void _nv21ToImage(FrameConversionData data, img.Image imgImage) {
+  final yBytes = data.planeBytes[0];
+  final yStride = data.bytesPerRow[0];
+
+  // Some camera implementations deliver NV21 as a single packed plane
+  // (Y rows followed immediately by interleaved VU rows) instead of two
+  // separate Plane objects. Detect and handle both layouts.
+  final hasSeparateVuPlane = data.planeBytes.length > 1;
+  final vuBytes = hasSeparateVuPlane ? data.planeBytes[1] : yBytes;
+  final vuStride = hasSeparateVuPlane ? data.bytesPerRow[1] : yStride;
+  final vuOffset = hasSeparateVuPlane ? 0 : yStride * data.height;
+
+  for (var y = 0; y < data.height; y++) {
+    for (var x = 0; x < data.width; x++) {
+      final yValue = yBytes[y * yStride + x];
+
+      final vuIndex = vuOffset + (y ~/ 2) * vuStride + (x ~/ 2) * 2;
+      final vValue = vuBytes[vuIndex];
+      final uValue = vuBytes[vuIndex + 1];
+
+      _setYuvPixel(imgImage, x, y, yValue, uValue, vValue);
+    }
+  }
+}
+
+void _yuv420ToImage(FrameConversionData data, img.Image imgImage) {
+  final yBytes = data.planeBytes[0];
+  final yStride = data.bytesPerRow[0];
+  final uBytes = data.planeBytes[1];
+  final vBytes = data.planeBytes[2];
+  final uvStride = data.bytesPerRow[1];
+
+  for (var y = 0; y < data.height; y++) {
+    for (var x = 0; x < data.width; x++) {
+      final yValue = yBytes[y * yStride + x];
+
+      final uvIndex = (y ~/ 2) * uvStride + (x ~/ 2);
+      final uValue = uBytes[uvIndex];
+      final vValue = vBytes[uvIndex];
+
+      _setYuvPixel(imgImage, x, y, yValue, uValue, vValue);
+    }
+  }
+}
+
+void _setYuvPixel(
+  img.Image imgImage,
+  int x,
+  int y,
+  int yValue,
+  int uValue,
+  int vValue,
+) {
+  final r = (yValue + 1.402 * (vValue - 128)).round().clamp(0, 255);
+  final g = (yValue - 0.344 * (uValue - 128) - 0.714 * (vValue - 128))
+      .round()
+      .clamp(0, 255);
+  final b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
+
+  imgImage.setPixelRgba(x, y, r, g, b, 255);
+}
+
+void _bgraToImage(FrameConversionData data, img.Image imgImage) {
+  final plane = data.planeBytes[0];
+  final stride = data.bytesPerRow[0];
+
+  for (var y = 0; y < data.height; y++) {
+    for (var x = 0; x < data.width; x++) {
+      final offset = y * stride + x * 4;
+      final b = plane[offset];
+      final g = plane[offset + 1];
+      final r = plane[offset + 2];
+      final a = plane[offset + 3];
+      imgImage.setPixelRgba(x, y, r, g, b, a);
+    }
   }
 }

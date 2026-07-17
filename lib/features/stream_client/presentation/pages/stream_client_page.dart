@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../data/datasources/mjpeg_datasource.dart';
+import '../../../../core/di/injection.dart';
+import '../../domain/repositories/stream_client_repository.dart';
 import '../cubit/stream_client_cubit.dart';
 import '../cubit/stream_client_state.dart';
 import '../widgets/mjpeg_viewer.dart';
@@ -20,9 +21,7 @@ class _StreamClientPageState extends State<StreamClientPage> {
   @override
   void initState() {
     super.initState();
-    _cubit = StreamClientCubit(
-      datasource: MjpegClientDatasource(),
-    );
+    _cubit = StreamClientCubit(repository: sl<StreamClientRepository>());
   }
 
   @override
