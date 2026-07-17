@@ -13,6 +13,11 @@ class CameraServerState extends Equatable {
   final String? browserUrl;
   final String? errorMessage;
 
+  /// True while frame capture has been handed off to the native
+  /// background service (screen off) — the local CameraController is
+  /// disposed during this window, so the UI must not try to preview it.
+  final bool isBackgroundCapture;
+
   const CameraServerState({
     this.status = CameraServerStatus.initial,
     this.config = const StreamConfig(),
@@ -21,6 +26,7 @@ class CameraServerState extends Equatable {
     this.streamUrl,
     this.browserUrl,
     this.errorMessage,
+    this.isBackgroundCapture = false,
   });
 
   CameraServerState copyWith({
@@ -32,6 +38,7 @@ class CameraServerState extends Equatable {
     String? browserUrl,
     String? errorMessage,
     bool clearError = false,
+    bool? isBackgroundCapture,
   }) {
     return CameraServerState(
       status: status ?? this.status,
@@ -41,6 +48,7 @@ class CameraServerState extends Equatable {
       streamUrl: streamUrl ?? this.streamUrl,
       browserUrl: browserUrl ?? this.browserUrl,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      isBackgroundCapture: isBackgroundCapture ?? this.isBackgroundCapture,
     );
   }
 
@@ -53,5 +61,6 @@ class CameraServerState extends Equatable {
         streamUrl,
         browserUrl,
         errorMessage,
+        isBackgroundCapture,
       ];
 }

@@ -163,15 +163,16 @@ class _CameraServerViewState extends State<_CameraServerView> {
   Widget _buildStreamingView(BuildContext context, CameraServerState state) {
     final cubit = context.read<CameraServerCubit>();
     final isStreaming = state.status == CameraServerStatus.streaming;
-    final controller = cubit.cameraController;
 
     return Column(
       children: [
         Expanded(
-          child: CameraPreviewWidget(
-            controller: controller,
-            isStreaming: isStreaming,
-          ),
+          child: state.isBackgroundCapture
+              ? const _BackgroundCaptureNotice()
+              : CameraPreviewWidget(
+                  controller: cubit.cameraController,
+                  isStreaming: isStreaming,
+                ),
         ),
         if (state.streamUrl != null)
           ConnectionInfoWidget(
@@ -212,6 +213,30 @@ class _CameraServerViewState extends State<_CameraServerView> {
               label: Text(isStreaming ? 'Detener' : 'Iniciar Stream'),
             ),
             const SizedBox(width: 48),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackgroundCaptureNotice extends StatelessWidget {
+  const _BackgroundCaptureNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.visibility_off_outlined, size: 48, color: Colors.white54),
+            SizedBox(height: 16),
+            Text(
+              'Transmitiendo en segundo plano',
+              style: TextStyle(color: Colors.white54),
+            ),
           ],
         ),
       ),

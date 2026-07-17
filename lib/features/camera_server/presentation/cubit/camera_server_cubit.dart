@@ -23,10 +23,20 @@ class CameraServerCubit extends Cubit<CameraServerState>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (this.state.status != CameraServerStatus.streaming) return;
+
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      // Emit first: drops the UI's reference to the CameraController before
+      // handleAppBackgrounded() disposes it, so no widget tries to repaint
+      // an already-disposed controller.
+      emit(this.state.copyWith(isBackgroundCapture: true));
       _repository.handleAppBackgrounded();
     } else if (state == AppLifecycleState.resumed) {
-      _repository.handleAppForegrounded();
+      _repository.handleAppForegrounded().then((_) {
+        // Emit only once the new controller is ready, so the UI never sees
+        // an intermediate not-yet-initialized one.
+        if (!isClosed) emit(this.state.copyWith(isBackgroundCapture: false));
+      });
     }
   }
 
