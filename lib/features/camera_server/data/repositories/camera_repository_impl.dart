@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/entities/stream_config.dart';
 import '../../domain/repositories/camera_repository.dart';
@@ -50,6 +50,7 @@ class CameraRepositoryImpl implements CameraRepository {
     // Audio is a best-effort enhancement: a denied mic permission must
     // never block video streaming, so this never throws.
     final audioStream = await _audioDatasource.start();
+    debugPrint('[CameraRepositoryImpl] audioStream acquired: ${audioStream != null}');
     if (audioStream != null) {
       _mjpegServer.bindAudioStream(audioStream);
     }

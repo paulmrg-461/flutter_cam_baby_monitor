@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 
 import 'audio_jitter_buffer.dart';
@@ -18,17 +18,25 @@ class PcmAudioPlayer {
 
   final AudioJitterBuffer _buffer;
   bool _isSetup = false;
+  bool _loggedFirstFeed = false;
 
   Future<void> start() async {
     if (_isSetup) return;
     await FlutterPcmSound.setup(sampleRate: _sampleRate, channelCount: 1);
     FlutterPcmSound.setFeedCallback(_onFeed);
     _isSetup = true;
+    debugPrint('[PcmAudioPlayer] setup done, sampleRate=$_sampleRate');
   }
 
   void feed(Uint8List chunk) {
     _buffer.push(chunk);
-    if (_buffer.isPrimed) FlutterPcmSound.start();
+    if (_buffer.isPrimed) {
+      if (!_loggedFirstFeed) {
+        _loggedFirstFeed = true;
+        debugPrint('[PcmAudioPlayer] buffer primed (${_buffer.bufferedBytes} bytes), starting playback');
+      }
+      FlutterPcmSound.start();
+    }
   }
 
   void _onFeed(int remainingFrames) {
@@ -43,6 +51,7 @@ class PcmAudioPlayer {
 
   Future<void> stop() async {
     _buffer.reset();
+    _loggedFirstFeed = false;
     if (!_isSetup) return;
     _isSetup = false;
     FlutterPcmSound.setFeedCallback(null);

@@ -264,10 +264,15 @@ class MjpegServer {
     <div class="motion-alert" id="motionAlert"></div>
   </div>
   <p class="status">Conectado | puerto $_port</p>
-  <button id="soundBtn">Activar sonido de alerta</button>
+  <button id="soundBtn">Activar sonido</button>
   <script>
+    const AUDIO_SAMPLE_RATE = 16000;
+    const AUDIO_PREFILL_SEC = 0.3; // robustness over latency: same call as the Flutter client's jitter buffer
+
     let audioCtx = null;
     let soundEnabled = false;
+    let nextPlayTime = 0;
+    let leftoverByte = null; // odd byte carried across fetch chunks (16-bit samples can't split)
     const soundBtn = document.getElementById('soundBtn');
     const motionAlert = document.getElementById('motionAlert');
 
@@ -277,6 +282,7 @@ class MjpegServer {
       soundEnabled = true;
       soundBtn.textContent = 'Sonido activado';
       soundBtn.disabled = true;
+      startAudioStream();
     };
 
     function beep() {
@@ -307,6 +313,58 @@ class MjpegServer {
         }
       } catch (err) {}
     };
+
+    function playPcmChunk(bytes) {
+      let data = bytes;
+      if (leftoverByte !== null) {
+        const merged = new Uint8Array(data.length + 1);
+        merged[0] = leftoverByte;
+        merged.set(data, 1);
+        data = merged;
+        leftoverByte = null;
+      }
+      if (data.length % 2 !== 0) {
+        leftoverByte = data[data.length - 1];
+        data = data.subarray(0, data.length - 1);
+      }
+      if (data.length === 0) return;
+
+      const view = new DataView(data.buffer, data.byteOffset, data.length);
+      const sampleCount = data.length / 2;
+      const float32 = new Float32Array(sampleCount);
+      for (let i = 0; i < sampleCount; i++) {
+        float32[i] = view.getInt16(i * 2, true) / 32768;
+      }
+
+      const buffer = audioCtx.createBuffer(1, sampleCount, AUDIO_SAMPLE_RATE);
+      buffer.copyToChannel(float32, 0);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+      if (nextPlayTime < now + 0.05) {
+        nextPlayTime = now + AUDIO_PREFILL_SEC; // fell behind: re-buffer instead of glitching
+      }
+      source.start(nextPlayTime);
+      nextPlayTime += buffer.duration;
+    }
+
+    async function startAudioStream() {
+      try {
+        const resp = await fetch('/audio?token=$_authToken');
+        const reader = resp.body.getReader();
+        while (true) {
+          const result = await reader.read();
+          if (result.done) break;
+          if (soundEnabled && result.value && result.value.length) {
+            playPcmChunk(result.value);
+          }
+        }
+      } catch (err) {
+        console.error('audio stream error', err);
+      }
+    }
   </script>
 </body>
 </html>

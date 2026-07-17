@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
 /// Captures raw PCM16 audio from the microphone via `record`. Unlike the
@@ -29,7 +29,9 @@ class AudioDatasource {
   /// permission isn't granted — audio is an optional enhancement and must
   /// never block the underlying video stream.
   Future<Stream<Uint8List>?> start() async {
-    if (!await hasPermission()) return null;
+    final granted = await hasPermission();
+    debugPrint('[AudioDatasource] hasPermission -> $granted');
+    if (!granted) return null;
 
     final stream = await _recorder.startStream(
       const RecordConfig(
@@ -39,7 +41,15 @@ class AudioDatasource {
       ),
     );
     _isRecording = true;
-    return stream;
+    debugPrint('[AudioDatasource] startStream ok, isRecording=$_isRecording');
+    var loggedFirstChunk = false;
+    return stream.map((chunk) {
+      if (!loggedFirstChunk) {
+        loggedFirstChunk = true;
+        debugPrint('[AudioDatasource] first captured chunk: ${chunk.length} bytes');
+      }
+      return chunk;
+    });
   }
 
   Future<void> stop() async {

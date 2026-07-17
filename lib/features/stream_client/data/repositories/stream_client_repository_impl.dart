@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../../domain/repositories/stream_client_repository.dart';
 import '../datasources/audio_client_datasource.dart';
@@ -40,6 +41,7 @@ class StreamClientRepositoryImpl implements StreamClientRepository {
     }
 
     final audioUrl = _deriveUrl(url, '/audio');
+    debugPrint('[StreamClientRepositoryImpl] audioUrl=$audioUrl');
     if (audioUrl != null) {
       await _audioPlayer.start();
       _audioSubscription?.cancel();

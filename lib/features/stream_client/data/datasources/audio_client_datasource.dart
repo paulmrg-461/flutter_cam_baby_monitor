@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 /// Consumes the server's `/audio` endpoint: a continuous raw PCM16 byte
 /// stream (no framing, unlike the MJPEG multipart video stream). Best
@@ -14,16 +15,27 @@ class AudioClientDatasource {
 
   Future<void> connect(String url) async {
     disconnect();
+    debugPrint('[AudioClientDatasource] connecting to $url');
     try {
       _client = HttpClient();
       final request = await _client!.getUrl(Uri.parse(url));
       final response = await request.close();
+      debugPrint('[AudioClientDatasource] connected, status=${response.statusCode}');
+      var loggedFirstChunk = false;
       _subscription = response.listen(
-        (chunk) => _audioController.add(Uint8List.fromList(chunk)),
-        onError: (_) {},
+        (chunk) {
+          if (!loggedFirstChunk) {
+            loggedFirstChunk = true;
+            debugPrint('[AudioClientDatasource] first chunk received: ${chunk.length} bytes');
+          }
+          _audioController.add(Uint8List.fromList(chunk));
+        },
+        onError: (e) => debugPrint('[AudioClientDatasource] stream error: $e'),
         cancelOnError: false,
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[AudioClientDatasource] connect failed: $e');
+    }
   }
 
   void disconnect() {
