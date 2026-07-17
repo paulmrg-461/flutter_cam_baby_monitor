@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:baby_monitor/features/camera_server/data/datasources/audio_datasource.dart';
 import 'package:baby_monitor/features/camera_server/data/datasources/camera_datasource.dart';
 import 'package:baby_monitor/features/camera_server/data/datasources/mjpeg_server.dart';
 import 'package:baby_monitor/features/camera_server/data/datasources/native_camera_datasource.dart';
@@ -16,10 +17,13 @@ class MockMjpegServer extends Mock implements MjpegServer {}
 
 class MockNativeCameraDatasource extends Mock implements NativeCameraDatasource {}
 
+class MockAudioDatasource extends Mock implements AudioDatasource {}
+
 void main() {
   late MockCameraDatasource cameraDatasource;
   late MockMjpegServer mjpegServer;
   late MockNativeCameraDatasource nativeCameraDatasource;
+  late MockAudioDatasource audioDatasource;
   late CameraRepositoryImpl repository;
 
   const config = StreamConfig(
@@ -40,10 +44,12 @@ void main() {
     cameraDatasource = MockCameraDatasource();
     mjpegServer = MockMjpegServer();
     nativeCameraDatasource = MockNativeCameraDatasource();
+    audioDatasource = MockAudioDatasource();
     repository = CameraRepositoryImpl(
       cameraDatasource: cameraDatasource,
       mjpegServer: mjpegServer,
       nativeCameraDatasource: nativeCameraDatasource,
+      audioDatasource: audioDatasource,
     );
 
     when(() => cameraDatasource.initialize(any())).thenAnswer((_) async {});
@@ -138,6 +144,62 @@ void main() {
       // once more by handleAppForegrounded() reacquiring the camera.
       verify(() => cameraDatasource.initialize(config)).called(2);
       verify(() => cameraDatasource.startImageStream()).called(1);
+    },
+  );
+
+  test(
+    'success: starting streaming with mic permission granted captures and binds audio, '
+    'and declares the microphone type to the foreground service',
+    () async {
+      when(() => cameraDatasource.startImageStream())
+          .thenAnswer((_) => const Stream<Uint8List>.empty());
+      when(() => audioDatasource.start())
+          .thenAnswer((_) async => const Stream<Uint8List>.empty());
+      when(() => nativeCameraDatasource.startService(
+            micEnabled: any(named: 'micEnabled'),
+          )).thenAnswer((_) async {});
+
+      await repository.startStreaming();
+
+      verify(() => mjpegServer.bindAudioStream(any())).called(1);
+      verify(() => nativeCameraDatasource.startService(micEnabled: true))
+          .called(1);
+    },
+  );
+
+  test(
+    'failure: a denied mic permission never blocks video streaming',
+    () async {
+      when(() => cameraDatasource.startImageStream())
+          .thenAnswer((_) => const Stream<Uint8List>.empty());
+      when(() => audioDatasource.start()).thenAnswer((_) async => null);
+      when(() => nativeCameraDatasource.startService(
+            micEnabled: any(named: 'micEnabled'),
+          )).thenAnswer((_) async {});
+
+      await repository.startStreaming();
+
+      verify(() => mjpegServer.bindFrameStream(any())).called(1);
+      verifyNever(() => mjpegServer.bindAudioStream(any()));
+      verify(() => nativeCameraDatasource.startService(micEnabled: false))
+          .called(1);
+    },
+  );
+
+  test(
+    'security: stopping/disposing always releases the microphone, even if it was never started',
+    () async {
+      when(() => audioDatasource.stop()).thenAnswer((_) async {});
+      when(() => audioDatasource.dispose()).thenAnswer((_) async {});
+      when(() => nativeCameraDatasource.stopService()).thenAnswer((_) async {});
+      when(() => cameraDatasource.dispose()).thenAnswer((_) async {});
+      when(() => mjpegServer.stop()).thenAnswer((_) async {});
+
+      await repository.stopStreaming();
+      await repository.dispose();
+
+      verify(() => audioDatasource.stop()).called(1);
+      verify(() => audioDatasource.dispose()).called(1);
     },
   );
 }

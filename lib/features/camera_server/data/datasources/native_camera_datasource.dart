@@ -30,8 +30,14 @@ class NativeCameraDatasource {
 
   /// Starts the foreground service (shows the notification). Must be
   /// called while the app is foreground/visible.
-  Future<void> startService() {
-    return _controlChannel.invokeMethod('startService');
+  ///
+  /// [micEnabled] must reflect whether RECORD_AUDIO is already granted:
+  /// Android 14+ throws a SecurityException if the service claims the
+  /// microphone foreground-service type without holding the permission.
+  Future<void> startService({required bool micEnabled}) {
+    return _controlChannel.invokeMethod('startService', {
+      'micEnabled': micEnabled,
+    });
   }
 
   /// Opens the camera via Camera2 and starts capturing. Safe to call

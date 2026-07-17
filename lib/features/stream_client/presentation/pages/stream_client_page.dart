@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -17,6 +19,8 @@ class StreamClientPage extends StatefulWidget {
 class _StreamClientPageState extends State<StreamClientPage> {
   final _urlController = TextEditingController();
   late final StreamClientCubit _cubit;
+  bool _motionFlash = false;
+  Timer? _flashTimer;
 
   @override
   void initState() {
@@ -26,6 +30,7 @@ class _StreamClientPageState extends State<StreamClientPage> {
 
   @override
   void dispose() {
+    _flashTimer?.cancel();
     _urlController.dispose();
     _cubit.close();
     super.dispose();
@@ -38,6 +43,14 @@ class _StreamClientPageState extends State<StreamClientPage> {
     }
   }
 
+  void _onMotionTick() {
+    _flashTimer?.cancel();
+    setState(() => _motionFlash = true);
+    _flashTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _motionFlash = false);
+    });
+  }
+
   void _showFullscreen(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -46,6 +59,10 @@ class _StreamClientPageState extends State<StreamClientPage> {
           body: Stack(
             children: [
               MjpegViewerWidget(frameStream: _cubit.frameStream),
+              // Owns its own subscription/state: a pushed route's subtree
+              // is a separate Element tree that does not rebuild just
+              // because the page that pushed it calls setState().
+              _FullscreenMotionOverlay(cubit: _cubit),
               Positioned(
                 top: 40,
                 left: 16,
@@ -79,8 +96,10 @@ class _StreamClientPageState extends State<StreamClientPage> {
               ),
           ],
         ),
-        body: BlocBuilder<StreamClientCubit, StreamClientState>(
+        body: BlocConsumer<StreamClientCubit, StreamClientState>(
           bloc: _cubit,
+          listenWhen: (prev, curr) => prev.motionTick != curr.motionTick,
+          listener: (context, state) => _onMotionTick(),
           builder: (context, state) {
             return _buildBody(context, state);
           },
@@ -96,7 +115,14 @@ class _StreamClientPageState extends State<StreamClientPage> {
           _buildConnectionBar(context, state),
         Expanded(
           child: state.status == StreamClientStatus.connected
-              ? MjpegViewerWidget(frameStream: _cubit.frameStream)
+              ? Stack(
+                  children: [
+                    Positioned.fill(
+                      child: MjpegViewerWidget(frameStream: _cubit.frameStream),
+                    ),
+                    _MotionOverlay(visible: _motionFlash),
+                  ],
+                )
               : _buildPlaceholder(context, state),
         ),
       ],
@@ -172,6 +198,90 @@ class _StreamClientPageState extends State<StreamClientPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FullscreenMotionOverlay extends StatefulWidget {
+  const _FullscreenMotionOverlay({required this.cubit});
+
+  final StreamClientCubit cubit;
+
+  @override
+  State<_FullscreenMotionOverlay> createState() =>
+      _FullscreenMotionOverlayState();
+}
+
+class _FullscreenMotionOverlayState extends State<_FullscreenMotionOverlay> {
+  bool _visible = false;
+  Timer? _timer;
+  StreamSubscription<StreamClientState>? _subscription;
+  late int _lastTick = widget.cubit.state.motionTick;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscription = widget.cubit.stream.listen((state) {
+      if (state.motionTick == _lastTick) return;
+      _lastTick = state.motionTick;
+      _flash();
+    });
+  }
+
+  void _flash() {
+    _timer?.cancel();
+    setState(() => _visible = true);
+    _timer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _MotionOverlay(visible: _visible);
+}
+
+class _MotionOverlay extends StatelessWidget {
+  const _MotionOverlay({required this.visible});
+
+  final bool visible;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 200),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                color: Colors.red.withValues(alpha: 0.85),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: const Text(
+                  'Movimiento detectado',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.red, width: 4),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

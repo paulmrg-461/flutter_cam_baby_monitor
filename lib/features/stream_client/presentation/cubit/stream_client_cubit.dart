@@ -1,5 +1,6 @@
-import 'dart:typed_data';
+import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/repositories/stream_client_repository.dart';
@@ -10,6 +11,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
     : super(const StreamClientState());
 
   final StreamClientRepository _repository;
+  StreamSubscription<void>? _motionSubscription;
 
   Stream<Uint8List> get frameStream => _repository.frameStream;
 
@@ -21,6 +23,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
 
     try {
       await _repository.connect(url);
+      _listenForMotion();
 
       emit(state.copyWith(status: StreamClientStatus.connected));
     } catch (e) {
@@ -31,7 +34,17 @@ class StreamClientCubit extends Cubit<StreamClientState> {
     }
   }
 
+  void _listenForMotion() {
+    _motionSubscription?.cancel();
+    _motionSubscription = _repository.motionEvents.listen((_) {
+      SystemSound.play(SystemSoundType.alert);
+      emit(state.copyWith(motionTick: state.motionTick + 1));
+    });
+  }
+
   void disconnect() {
+    _motionSubscription?.cancel();
+    _motionSubscription = null;
     _repository.disconnect();
     emit(state.copyWith(status: StreamClientStatus.disconnected));
   }
@@ -49,6 +62,7 @@ class StreamClientCubit extends Cubit<StreamClientState> {
 
   @override
   Future<void> close() {
+    _motionSubscription?.cancel();
     _repository.dispose();
     return super.close();
   }
