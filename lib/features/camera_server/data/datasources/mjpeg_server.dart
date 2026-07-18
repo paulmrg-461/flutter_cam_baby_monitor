@@ -276,14 +276,73 @@ class MjpegServer {
     const soundBtn = document.getElementById('soundBtn');
     const motionAlert = document.getElementById('motionAlert');
 
-    soundBtn.onclick = () => {
+    // Without a user gesture, Chrome's autoplay policy leaves
+    // resume()'s promise permanently pending (it does not reject) —
+    // so this must never be `await`-ed behind a guard that blocks later
+    // calls. Each call fires its own resume() attempt and only the one
+    // that actually lands during a real gesture will resolve to
+    // 'running'; whichever gets there first wins via the soundEnabled
+    // check inside .then().
+    function enableSound() {
+      if (soundEnabled) return;
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      audioCtx.resume();
-      soundEnabled = true;
-      soundBtn.textContent = 'Sonido activado';
-      soundBtn.disabled = true;
-      startAudioStream();
-    };
+      audioCtx.resume().then(() => {
+        if (soundEnabled || audioCtx.state !== 'running') return;
+        soundEnabled = true;
+        soundBtn.textContent = 'Sonido activado';
+        soundBtn.disabled = true;
+        startAudioStream();
+      }).catch(() => {});
+    }
+
+    soundBtn.onclick = enableSound;
+
+    // Best-effort on load (works in some PWA/installed contexts); on
+    // regular Chrome tabs this stays pending until the listeners below
+    // catch the user's first real tap/click anywhere on the page.
+    enableSound();
+    document.addEventListener('click', enableSound);
+    document.addEventListener('touchend', enableSound);
+
+    // Screen Wake Lock: keeps the display on while this page is open.
+    // The API requires a secure context (https, or localhost) — it's
+    // unavailable on a plain http://<lan-ip> origin, which is how this
+    // server is normally reached. Fall back to a muted, always-playing
+    // video: most browsers/OSes suppress screen dimming/locking while
+    // media is actively playing, regardless of scheme.
+    let wakeLock = null;
+    let wakeVideo = null;
+
+    function createNoSleepVideo() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      canvas.getContext('2d').fillRect(0, 0, 1, 1);
+      const video = document.createElement('video');
+      video.muted = true;
+      video.setAttribute('muted', '');
+      video.setAttribute('playsinline', '');
+      video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;';
+      video.srcObject = canvas.captureStream(1);
+      document.body.appendChild(video);
+      return video;
+    }
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          return;
+        }
+      } catch (err) {}
+      wakeVideo = wakeVideo || createNoSleepVideo();
+      wakeVideo.play().catch(() => {});
+    }
+    requestWakeLock();
+    document.addEventListener('click', requestWakeLock);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    });
 
     function beep() {
       if (!soundEnabled || !audioCtx) return;
